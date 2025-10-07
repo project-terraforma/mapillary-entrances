@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Env and tokens
+.env
+
+# Large data folders
+data/
+results/
+
+# Images, metadata, detections
+*.jpg
+*.jpeg
+*.png
+*.json
+*.parquet
+*.zip
+
+# Editor / OS junk
+.DS_Store
+.vscode/
