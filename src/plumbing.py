@@ -183,6 +183,53 @@ def query_buildings_places_join(bbox: Dict[str, float], radius_m: int = 30) -> p
     con.close()
     return df
 
+def _deg_per_meter(lat_deg: float):
+    # meters → degrees for small radii; longitude scales by cos(lat)
+    dlat = 1.0 / 111_320.0
+    dlon = dlat / max(0.01, abs(math.cos(math.radians(lat_deg))))
+    return dlat, dlon
+
+def get_places_near_building_centroid(lon: float, lat: float, radius_m: int) -> pd.DataFrame:
+    """
+    Query Overture Places within ~radius_m of (lon, lat), independent of the main bbox.
+    This avoids bbox-edge misses and guarantees we look right around the building.
+    """
+    dlat, dlon = _deg_per_meter(lat)
+    bbx = {
+        "xmin": lon - radius_m * dlon,
+        "xmax": lon + radius_m * dlon,
+        "ymin": lat - radius_m * dlat,
+        "ymax": lat + radius_m * dlat,
+    }
+    con = _open_duckdb()
+    con.execute(f"SELECT COUNT(*) FROM glob('{PLACES_URL}')").fetchone()
+    # Prefilter by tight bbox, then exact within test
+    sql = f"""
+    WITH places AS (
+      SELECT
+        id AS place_id,
+        geometry AS pgeom,
+        names,
+        categories,
+        ST_X(geometry) AS place_lon,
+        ST_Y(geometry) AS place_lat
+      FROM read_parquet('{PLACES_URL}', hive_partitioning=1)
+      WHERE
+        struct_extract(bbox,'xmin') BETWEEN {bbx['xmin']} AND {bbx['xmax']}
+        AND struct_extract(bbox,'ymin') BETWEEN {bbx['ymin']} AND {bbx['ymax']}
+    )
+    SELECT *
+    FROM places
+    WHERE ST_DWithin(
+            pgeom,
+            ST_Point({lon}, {lat}),
+            {radius_m} / 111320.0  -- degree approximation; good for ≤200 m
+          );
+    """
+    df = con.execute(sql).fetchdf()
+    con.close()
+    return df
+
 
 # ---------- Mapillary fetching ----------
 def fetch_images_for_building_row(
@@ -306,13 +353,17 @@ def main():
 
     # 3) For each building: subset places, fetch images, write candidates.json
     for _, b in bdf.iterrows():
-        b_places = links[links["building_id"] == b["id"]] if not links.empty else pd.DataFrame()
+        b_places = get_places_near_building_centroid(
+            lon=float(b["lon"]),
+            lat=float(b["lat"]),
+            radius_m=args.place_radius_m
+        )
         saved = fetch_images_for_building_row(
             b,
             radius_m=args.radius_m,
             min_capture_date=args.min_capture_date,
             apply_fov=not args.no_fov,
-            max_images_per_building=args.max_images_per_building,
+            max_images_per_building=args.max_images_per_building,     
         )
         write_candidates_json(b, b_places, saved)
 
