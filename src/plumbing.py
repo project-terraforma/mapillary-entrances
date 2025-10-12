@@ -40,7 +40,7 @@ dotenv.load_dotenv()
 # ---------- Config ----------
 RELEASE = "2025-09-24.0"
 S3_URL_BUILDINGS = f"s3://overturemaps-us-west-2/release/{RELEASE}/theme=buildings/type=building/*"
-PLACES_URL      = f"s3://overturemaps-us-west-2/release/{RELEASE}/theme=places/type=place/*"
+PLACES_URL       = f"s3://overturemaps-us-west-2/release/{RELEASE}/theme=places/type=place/*"
 
 RESULTS_ROOT = Path("results/buildings")
 RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -189,42 +189,67 @@ def _deg_per_meter(lat_deg: float):
     dlon = dlat / max(0.01, abs(math.cos(math.radians(lat_deg))))
     return dlat, dlon
 
-def get_places_near_building_centroid(lon: float, lat: float, radius_m: int) -> pd.DataFrame:
+def get_places_near_building_centroid(
+    lon: float,
+    lat: float,
+    radius_m: int,
+    max_places: int = 20,
+    category_allow: tuple[str, ...] = ("restaurant", "cafe", "food", "bar", "shop", "retail", "store", "service"),
+) -> pd.DataFrame:
     """
-    Query Overture Places within ~radius_m of (lon, lat), independent of the main bbox.
-    This avoids bbox-edge misses and guarantees we look right around the building.
+    Return up to `max_places` Places within ~radius_m of (lon,lat),
+    filtered to frontage-relevant categories and sorted by distance to the building centroid.
     """
-    dlat, dlon = _deg_per_meter(lat)
+    dlat = 1.0 / 111_320.0
+    dlon = dlat / max(0.01, abs(math.cos(math.radians(lat))))
     bbx = {
         "xmin": lon - radius_m * dlon,
         "xmax": lon + radius_m * dlon,
         "ymin": lat - radius_m * dlat,
         "ymax": lat + radius_m * dlat,
     }
+
+    # simple category predicate: names/categories may be arrays or strings in Overture.
+    # We'll do a lowercase string search on categories JSON text for now.
+    cat_pred = " OR ".join([f"lower(cats) LIKE '%{c}%'" for c in category_allow])
+
     con = _open_duckdb()
     con.execute(f"SELECT COUNT(*) FROM glob('{PLACES_URL}')").fetchone()
-    # Prefilter by tight bbox, then exact within test
+
     sql = f"""
-    WITH places AS (
+    WITH raw AS (
       SELECT
         id AS place_id,
         geometry AS pgeom,
         names,
         categories,
+        CAST(categories AS VARCHAR) AS cats, -- to text for LIKE filtering
         ST_X(geometry) AS place_lon,
         ST_Y(geometry) AS place_lat
       FROM read_parquet('{PLACES_URL}', hive_partitioning=1)
       WHERE
         struct_extract(bbox,'xmin') BETWEEN {bbx['xmin']} AND {bbx['xmax']}
         AND struct_extract(bbox,'ymin') BETWEEN {bbx['ymin']} AND {bbx['ymax']}
+    ),
+    filtered AS (
+      SELECT *
+      FROM raw
+      WHERE ({cat_pred})
+    ),
+    with_dist AS (
+      SELECT
+        *,
+        /* degree-distance approx in meters (good for ≤200 m) */
+        SQRT( POW( (place_lat - {lat}) * 111320.0, 2 )
+            + POW( (place_lon - {lon}) * 111320.0 * COS(RADIANS({lat})), 2 ) ) AS dist_m
+      FROM filtered
+      WHERE ST_DWithin(pgeom, ST_Point({lon}, {lat}), {radius_m} / 111320.0)
     )
-    SELECT *
-    FROM places
-    WHERE ST_DWithin(
-            pgeom,
-            ST_Point({lon}, {lat}),
-            {radius_m} / 111320.0  -- degree approximation; good for ≤200 m
-          );
+    SELECT
+      place_id, place_lon, place_lat, names, categories, dist_m
+    FROM with_dist
+    ORDER BY dist_m ASC
+    LIMIT {max_places};
     """
     df = con.execute(sql).fetchdf()
     con.close()
@@ -318,9 +343,10 @@ def write_candidates_json(
                 "lat": float(r["place_lat"]),
                 "names": r.get("names", None),
                 "categories": r.get("categories", None),
-            }
-            for _, r in places_df.iterrows()
+                "distance_m": float(r.get("dist_m", 0.0)),
+            } for _, r in places_df.iterrows()
         ],
+
         "images": saved_images,
     }
     (out_dir / "candidates.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
@@ -356,8 +382,10 @@ def main():
         b_places = get_places_near_building_centroid(
             lon=float(b["lon"]),
             lat=float(b["lat"]),
-            radius_m=args.place_radius_m
+            radius_m=max(40, args.place_radius_m),  # try 40–60
+            max_places=20
         )
+
         saved = fetch_images_for_building_row(
             b,
             radius_m=args.radius_m,
