@@ -15,8 +15,7 @@ def build_ray_from_meta(meta: dict, bearing_deg: float, length_m=60.0) -> LineSt
     cam_lon, cam_lat = (
         (meta.get("computed_geometry") or meta.get("geometry"))["coordinates"]
     )
-    # geo.single_image_line expects file/metadata and returns shapely-ish line;
-    # or you can create a short forward point using geo functions you have.
+
     return geo.single_image_line(None, meta, 'line', None, None, None)  # or implement your own small helper
 
 def localize_building_entrance(building_poly: Polygon, image_dir: Path) -> dict | None:
@@ -53,4 +52,3 @@ def localize_building_entrance(building_poly: Polygon, image_dir: Path) -> dict 
 
     # If ≥2 rays: triangulate (use geo_estimator.triangulate if it takes lines)
     # Otherwise, fall back to nearest boundary point of first ray intersection
-    # (You’ll wire this to your actual geo_estimator API.)

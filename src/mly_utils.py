@@ -7,7 +7,7 @@ import os
 import math
 import json
 from typing import List, Dict, Tuple, Optional
-from datetime import datetime # Added for date operations
+from datetime import datetime, date # Added for date operations
 
 import requests
 import cv2 # type: ignore
@@ -41,6 +41,9 @@ def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlambda)
     bearing = math.degrees(math.atan2(x, y))
     return (bearing + 360) % 360
+def _is_360(img: dict) -> bool:
+    ct = (img.get("camera_type") or "").lower()
+    return ct in {"spherical", "equirectangular", "panorama", "panoramic", "360"}
 
 # ── MAPILLARY API HELPERS ────────────────────────────────────────────────────
 def fetch_images(
@@ -49,7 +52,8 @@ def fetch_images(
     lon: float,
     radius_m: float,
     fields: Optional[List[str]] = None,
-    min_capture_date_filter: Optional[datetime.date] = None
+    min_capture_date_filter: Optional[datetime.date] = None,
+    prefer_360: bool = False,
 ) -> List[Dict]:
     """Query Mapillary Graph API for images inside *radius_m* of *lat*, *lon*.
 
@@ -66,7 +70,12 @@ def fetch_images(
             "thumb_256_url", "thumb_1024_url", "thumb_2048_url", "thumb_original_url",
             "camera_type"
         ]
-
+    if isinstance(min_capture_date_filter, str):
+        try:
+            min_capture_date_filter = date.fromisoformat(min_capture_date_filter)
+        except ValueError:
+            min_capture_date_filter = None
+            
     min_lon, min_lat, max_lon, max_lat = _bbox_around(lat, lon, radius_m)
     params = {
         "bbox": f"{min_lon},{min_lat},{max_lon},{max_lat}",
@@ -74,8 +83,16 @@ def fetch_images(
         "limit": 2000,
     }
     headers = {"Authorization": f"OAuth {token}"}
-    resp = requests.get("https://graph.mapillary.com/images", params=params, headers=headers, timeout=30)
-    resp.raise_for_status()
+    resp = requests.get("https://graph.mapillary.com/images", params=params, headers=headers, timeout=90)
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as e:
+        # If Mapillary has a temporary 5xx hiccup, just skip this building gracefully
+        if resp is not None and 500 <= resp.status_code < 600:
+            print("    [mly] Server 5xx from Mapillary; skipping this batch.")
+            return []
+        raise
+
 
     candidates = resp.json().get("data", [])
     in_radius: List[Dict] = []
@@ -89,12 +106,18 @@ def fetch_images(
             img["distance_m"] = dist
             in_radius.append(img)
     
-    # Filter by camera_type to exclude fisheye lenses
+    # Filter by camera_type to exclude *only* fisheye lenses
     initial_count = len(in_radius)
-    in_radius = [img for img in in_radius if img.get('camera_type') != 'fisheye' and img.get('camera_type') != 'spherical']
+    in_radius = [img for img in in_radius if (img.get('camera_type') or '').lower() != 'fisheye']
     filtered_count = initial_count - len(in_radius)
     if filtered_count > 0:
         print(f"  [mly_utils] {filtered_count} fisheye images filtered out. {len(in_radius)} remaining.")
+    # Prefer 360° images if available
+    if prefer_360:
+        only_360 = [i for i in in_radius if _is_360(i)]
+        if only_360:
+            in_radius = only_360
+
     # Filter by min_capture_date if specified
     if min_capture_date_filter and in_radius:
         initial_image_count = len(in_radius)
