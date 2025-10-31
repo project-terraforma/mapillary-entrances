@@ -5,6 +5,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 import cv2
+from api import get_building_package_for_point
 
 try:
     from ultralytics import YOLO
@@ -75,7 +76,8 @@ def filter_images_by_quality(
     Returns the list of images that passed quality filters.
     """
     good_images = []
-    for img in images:
+    for img_path in images:
+        img = cv2.imread(img_path["image_path"])
         if (has_enough_resolution(img, min_width, min_height) and
             is_sharp(img, sharpness_thresh) and
             is_well_exposed(img, dark_thresh, bright_thresh)):
@@ -548,32 +550,46 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Mini validation: segmentation + YOLO door detection")
-    parser.add_argument("--images_dir", type= str, required=True, help="Folder of sample .jpg images")
-    parser.add_argument("--coordinates", type = str, required = True, help = "Coordinates of building")
+    parser.add_argument("--coordinates", type = str, required = True, help = "Reference coordinates to check")
     parser.add_argument("--yolo_weights", type=str, required=True, help="Path to YOLOv8 door weights (.pt)")
     parser.add_argument("--device", type=str, default=None, help="e.g., 'cpu' or 'cuda:0'")
     parser.add_argument("--save_vis", type=str, default=None, help="Folder to save visualization outputs")
-    parser.add_argument("--no_rois", action="store_true", help="Run YOLO on full image instead of ROI crops")
+    parser.add_argument("--use_rois", type=bool, default=False, help="Run YOLO on full image instead of ROI crops")
     parser.add_argument("--facade_tau", type=float, default=0.01, help="Façade presence threshold [0..1]")
     parser.add_argument("--conf", type=float, default=0.35, help="YOLO confidence threshold")
     parser.add_argument("--iou", type=float, default=0.5, help="YOLO NMS IOU threshold")
+    parser.add_argument("--search_building_radius", type=int, default=120, help="Radius threshold for finding potential buildings")
+    parser.add_argument("--search_place_radius", type=int, default=60, help="Radius threshold for matching building and place")
+    parser.add_argument("--limit-buildings", type=int, default=10, help="Maximum number of potential buildings")
+    parser.add_argument("--max_images_per_building", type=int, default=8, help="Maximum number of images per building")
+    parser.add_argument("--min-capture-date", type=str, default=None, help="Minimum data of data release")
+    parser.add_argument("--use_fov", type=bool, default=True, help="Use field of view")
+    parser.add_argument("--prefer_360", type=bool, default=True help="Prefer to use 360 degree imagery from Mapillary")
+    parser.add_argument("--fov_half_angle", type=float, default=25.0, help="Field of view half angle")
+    parser.add_argument("--src_mode", choices=["auto","local","s3"], default="auto", help="Prefer local files")
     args = parser.parse_args()
 
     if not _HAS_ULTRALYTICS:
         raise SystemExit("ERROR: ultralytics not installed. Try: pip install ultralytics")
 
-
-    building_lat_lon = args.coordinates.split(",")
-    centroid_lat, centroid_lon = map(float, building_lat_lon)
-    wall_points_lat_lon = pull_building_data(building_lat_lon) #list of lists of wall coordinates -> [Alat, Alon, Blat, Blon ...]
-    wall_points_xy = [to_xy(p[0], p[1], building_lat_lon[0], building_lat_lon[1]) for p in wall_points_lat_lon] #list of numpy arrays
-
-    walls = []
-    # Function to get nearby mapillary images from reference coordinates
-    # This will ideally have format [ {"image_path": ./img, "compass_angle": angle, "coordinates": [lat,lon]}, {...} ]
-    all_images = pull_mapillary_imagery(building_lat_lon)
-    all_images = filter_images_by_quality(all_images, sharpness_thresh = 100.0, min_width = 300, min_height= 300, dark_thresh = 0.05, bright_thresh = 0.95)
-
+    lat, lon = args.coordinates.split(" ")
+    data = get_building_package_for_point(lat, lon, args.search_building_radius, 
+                                            args.search_place_radius, args.max_images_per_building, 
+                                            args.min_capture_date, args.prefer_360, args.fov_half_angle, 
+                                            args.apply_fov, args.src_mode)
+    
+    building_id = data["building_id"]
+    centroid_lat, centroid_lon = data["building_center"][0], data["building_center"][1]
+    all_images = data["images_dict"]
+    place = data["place"]
+    if place is None:
+        print("No matching place found")
+    wall_points_lat_lon = data["walls"]
+  
+    # all_images -> [ {"image_path": ./img, "compass_angle": angle, "coordinates": [lat,lon]}, {...} ]
+    all_images = filter_images_by_quality(all_images, sharpness_thresh = 100.0, 
+                                          min_width = 300, min_height= 300, 
+                                          dark_thresh = 0.05, bright_thresh = 0.95)
 
     # Main Loop:
     # Filter candidate images to point at current wall 
@@ -582,8 +598,8 @@ if __name__ == "__main__":
     
     #make iterate two at a time
     potential_entrance = None
-    for point1, point2 in wall_points_lat_lon:
-        edge1_lat, edge1_lon, edge2_lat, edge2_lon = point1[0], point1[1], point2[0], point2[1] 
+    for wall in wall_points_lat_lon:
+        edge1_lat, edge1_lon, edge2_lat, edge2_lon = wall[0][0], wall[0][1], wall[1][0], wall[1][1]
         max_frontness = 0
         best_img = {} #best image will be the single dictionary with image path, coordinates, and compass angle
         for img in all_images:
@@ -592,12 +608,12 @@ if __name__ == "__main__":
                 cam_lat, cam_lon, cam_bearing_deg,
                 edge1_lat, edge1_lon, edge2_lat, edge2_lon,
                 centroid_lat, centroid_lon,
-                fov_half_angle_deg=40.0
-            )
+                args.fov_half_angle_deg)
             if check:
                 if img_scores["frontness"] > max_frontness:
                     max_frontness = img_scores["frontness"]
                     best_img = img
+                    best_wall = wall
 
         #no images facing towards wall so move to next wall
         if len(best_img) == 0:
@@ -610,7 +626,7 @@ if __name__ == "__main__":
             best_img['image_path'],
             yolo_weights_path=args.yolo_weights,
             facade_tau=args.facade_tau,
-            use_rois=(not args.no_rois),
+            use_rois=(args.use_rois),
             conf_thr=args.conf,
             iou_thr=args.iou,
             device=args.device,
@@ -624,8 +640,7 @@ if __name__ == "__main__":
         
     else:
         best_img["bbox"] = detection #detection is (x1, y1, x2, y2)
-        entrance_point = extract_bbox_coordinates(best_img,
-                            (point1, point2),
-                            centroid_lat, centroid_lon, 
-                            hfov_deg=70.0)
+        wall_tuple = (best_wall[0][0], best_wall[0][1], best_wall[1][0], best_wall[1][1])
+        entrance_point = extract_bbox_coordinates(best_img, wall_tuple,
+                            centroid_lat, centroid_lon, hfov_deg=70.0)
         print(f"Entrance Found at ({entrance_point[0]}, {entrance_point[1]})")
