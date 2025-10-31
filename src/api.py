@@ -59,13 +59,13 @@ def get_building_package_for_point(
       - fetches/slices imagery (returns Evan schema)
       - returns polygon [[lon,lat], ...] and wall segments [[lon,lat], [lon,lat]]...
     """
-    # 1) sources & buildings
+    # get nearest building
     bbox_small = _point_bbox(lon, lat, meters=search_radius_m)
     b_src, p_src = resolve_sources(bbox_small, src_mode)
     bdf = get_buildings(bbox_small, b_src, limit_hint=50)
     b = _nearest_building(bdf, lat, lon)
 
-    # 2) places join & selection
+    # join building with place data 
     links = join_buildings_places(bdf, bbox_small, p_src, radius_m=place_radius_m)
     best_place = select_best_place_for_building(
         links[links["building_id"] == b["id"]],
@@ -73,7 +73,7 @@ def get_building_package_for_point(
         max_dist_m=place_radius_m
     )
 
-    # 3) imagery (returns detailed saved records)
+    # imagery (returns detailed saved records)
     saved = fetch_and_slice_for_building(
         b,
         radius_m=search_radius_m,
@@ -84,10 +84,10 @@ def get_building_package_for_point(
         fov_half_angle=fov_half_angle,
     )
 
-    # 4) write candidates.json (also returns jpg→json list)
+    # write candidates.json (also returns jpg→json list)
     pairs = write_candidates_json(b, best_place, saved)
 
-    # 5) polygon + simple wall segments (edges of the exterior ring)
+    # polygon + simple wall segments (edges of the exterior ring)
     polygon = polygon_vertices_from_wkt(b["wkt"])  # [[lon,lat], ...]
     walls: List[List[List[float]]] = []
     if len(polygon) >= 2:
@@ -96,7 +96,7 @@ def get_building_package_for_point(
             bpt = polygon[(i + 1) % len(polygon)]
             walls.append([a, bpt])
 
-    # Build Evan-friendly list
+    # build list to be used in inference.py
     evan_images: List[Dict[str, Any]] = []
     for rec in saved:
         evan_images.append({
@@ -114,10 +114,10 @@ def get_building_package_for_point(
     return {
         "building_id": b["id"],
         "building_center": [float(b["lat"]), float(b["lon"])],
-        "polygon": polygon,    # [[lon,lat], ...]
-        "walls": walls,        # [ [[lon,lat],[lon,lat]], ...]
+        "polygon": polygon, # [[lon,lat], ...]
+        "walls": walls, # [ [[lon,lat],[lon,lat]], ...]
         "place": best_place or None,
         "evan_images": evan_images,
-        "pairs": pairs,        # [{jpg: json}, ...]
+        "pairs": pairs,  # [{jpg: json}, ...]
     }
 
