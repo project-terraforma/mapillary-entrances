@@ -564,7 +564,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_images_per_building", type=int, default=8, help="Maximum number of images per building")
     parser.add_argument("--min-capture-date", type=str, default=None, help="Minimum data of data release")
     parser.add_argument("--use_fov", type=bool, default=True, help="Use field of view")
-    parser.add_argument("--prefer_360", type=bool, default=True help="Prefer to use 360 degree imagery from Mapillary")
+    parser.add_argument("--prefer_360", type=bool, default=True, help="Prefer to use 360 degree imagery from Mapillary")
     parser.add_argument("--fov_half_angle", type=float, default=25.0, help="Field of view half angle")
     parser.add_argument("--src_mode", choices=["auto","local","s3"], default="auto", help="Prefer local files")
     args = parser.parse_args()
