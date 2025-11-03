@@ -1,9 +1,28 @@
-# pipeline.py
+# pipeline_one_building.py
 # currently using api.py for single building functionality 
 import argparse
 from .api import get_building_package_for_point
 from .inference import run_inference
 from .utils import parse_bbox_string
+
+'''
+Example Usage:
+PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline_one_building \
+  --point="37.7860,-122.4005" \
+  --search_radius=120 \
+  --place_radius=60 \
+  --limit_buildings=1 \
+  --max_images_per_building=5 \
+  --prefer_360 \
+  --src_mode=auto \
+  --model="./"yolov8s.pt"" \
+  --device="cuda" \
+  --hfov=45.0 \
+  --facade_tau=0.35 \
+  --conf=0.4 \
+  --iou=0.5 \
+  --save-vis="./outputs/visualizations"
+'''
 
 def build_parser():
     p = argparse.ArgumentParser(...)
@@ -38,19 +57,23 @@ def main():
 
     # parse bbox/point strings into tuples once
     bbox = parse_bbox_string(args.bbox) if args.bbox else None
-    lat, lon = args.point.split(" ") if args.point else None
-    point = (lat,lon)
+    lat, lon = args.point.split(",") if args.point else None
+    lat = float(lat)
+    lon = float(lon)
 
     # data gathering
+    print("Gathering Data")
     data = get_building_package_for_point(lat, lon, args.search_radius,
                                           args.place_radius, args.max_images_per_building,
                                           args.min_capture_date, args.prefer_360,
                                           args.fov_half_angle, args.apply_fov, args.src_mode)
     
+    print("Finished Gathering Data")
+    
     # inference
     results = run_inference(data, args.hfov, 
                   args.model, args.facade_tau, args.use_rois, 
                   args.conf, args.iou, args.device, args.save_vis)
-
+    print("Finished Inference")
 if __name__ == "__main__":
     main()

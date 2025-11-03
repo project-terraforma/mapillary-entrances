@@ -42,15 +42,14 @@ def _nearest_building(bdf: pd.DataFrame, lat: float, lon: float) -> pd.Series:
 def get_building_package_for_point(
     lat: float,
     lon: float,
-    *,
-    search_radius_m: int = 120,
-    place_radius_m: int = 60,
-    max_images_per_building: int = 8,
-    min_capture_date: Optional[str] = None,
-    prefer_360: bool = True,
-    fov_half_angle: float = 25.0,
-    apply_fov: bool = True,
-    src_mode: str = "auto",
+    search_radius_m: int,
+    place_radius_m: int,
+    max_images_per_building: int,
+    min_capture_date: Optional[str],
+    prefer_360: bool,
+    fov_half_angle: float,
+    apply_fov: bool,
+    src_mode: str,
 ) -> Dict[str, Any]:
     """
     Single-point adapter for inference.py:

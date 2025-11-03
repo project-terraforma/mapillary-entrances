@@ -30,7 +30,7 @@ def main():
     ap.add_argument("--min-capture-date", type=str, default=None)
     ap.add_argument("--no-fov", action="store_true")
     ap.add_argument("--prefer-360", action="store_true")
-    ap.add_argument("--fov-half-angle", type=float, default=25.0)
+    ap.add_argument("--fov-half-angle", type=float, default=45.0)
     ap.add_argument("--src-mode", choices=["auto","local","s3"], default="auto")
     args = ap.parse_args()
     print(f"[args] {args}", flush=True)
