@@ -4,12 +4,13 @@
 # example usage 
 """
 PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.cli_plumbing \
-  --bbox="-122.4045,37.7825,-122.3965,37.7895" \
-  --radius-m=120 --place-radius-m=60 \
+  --bbox="-122.4106,37.7918,-122.4028,37.7980" \
+  --radius-m=50 --place-radius-m=10 \
   --limit-buildings=10 --max-images-per-building=8 \
-  --prefer-360 --src-mode=auto
+  --prefer-360 --src-mode=local
 """
 
+import math
 import argparse, os, time, pandas as pd
 from .utils import parse_bbox_string, tlog
 from .sources import resolve_sources
@@ -58,7 +59,12 @@ def main():
         b_links = links[links["building_id"] == b["id"]] if not links.empty else pd.DataFrame()
         best_place = select_best_place_for_building(b_links, building_id=b["id"], max_dist_m=60)
         if best_place:
-            print(f"  ↳ place: {best_place.get('name')} (dist {best_place.get('dist_m', 0):.1f} m)")
+            nm = best_place.get("name") or "<unnamed>"
+            d  = best_place.get("dist_m")
+            if d is not None and math.isfinite(d):
+                print(f"  ↳ place: {nm} (dist {d:.1f} m)")
+            else:
+                print(f"  ↳ place: {nm}")
         else:
             print("  ↳ place: <none>")
 
