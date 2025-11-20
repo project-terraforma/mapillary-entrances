@@ -1,5 +1,14 @@
-duckdb>=1.0.0
+numpy>=1.26
 pandas>=2.0
+pyarrow>=15.0.0
+duckdb>=1.0.0
+pyproj>=3.6.0
 shapely>=2.0
-requests>=2.31
-pyarrow>=15
+geopandas>=0.14.0
+opencv-python>=4.9.0
+ultralytics>=8.0.196
+torch>=2.1.0
+torchvision>=0.16.0
+requests>=2.31.0
+pytest>=7.4
+python-dotenv
