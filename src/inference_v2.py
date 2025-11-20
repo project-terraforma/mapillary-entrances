@@ -90,7 +90,7 @@ def filter_images_by_quality(
     bad_images_dir.mkdir(parents=True, exist_ok=True)
 
     for img_path in images:
-        img = cv2.imread(img_path["image_path"])
+        img = cv2.imread(img_path['image_path'])
         if img is None:
             print(f"[WARN] Could not read {img_path['image_path']}")
             continue
@@ -102,7 +102,7 @@ def filter_images_by_quality(
             bad_images.append(img_path)
 
             # copy bad image to diagnostics folder
-            src = Path(img_path["image_path"])
+            src = Path(img_path['image_path'])
             dst = bad_images_dir / src.name
             try:
                 shutil.move(src, dst)
@@ -165,8 +165,8 @@ def run_yolo_on_image(
 def _draw_dets(img: np.ndarray, dets: List[Dict], color=(0, 200, 0)) -> np.ndarray:
     vis = img.copy()
     for d in dets:
-        x1, y1, x2, y2 = d["bbox"]
-        conf = d["conf"]
+        x1, y1, x2, y2 = d['bbox']
+        conf = d['conf']
         label = d.get("cls_name", "obj")
         cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
         cv2.putText(vis, f"{label} {conf:.2f}", (x1, max(0, y1 - 6)),
@@ -221,7 +221,7 @@ def validate_folder_with_seg_and_yolo(
     else:
         entrance_list = []
         for i in range(len(entrance_dets)):
-            entrance_list.append(entrance_dets[i]["bbox"])
+            entrance_list.append(entrance_dets[i]['bbox'])
         return entrance_list # [(x1, y1, x2, y2), ... ]
 
 
@@ -248,11 +248,11 @@ def extract_bbox_coordinates(
     returns (ray_origin_xy, direction_xy)
     """
     # camera origin in local XY
-    cam_lon, cam_lat = image_dict["coordinates"][0], image_dict["coordinates"][1]
+    cam_lon, cam_lat = image_dict['coordinates'][0], image_dict['coordinates'][1]
     C = to_local_xy(cam_lon, cam_lat, proj_local)  # shape (2,)
 
     # load image to get width for intrinsics
-    img = cv2.imread(str(image_dict["image_path"]), cv2.IMREAD_COLOR)
+    img = cv2.imread(str(image_dict['image_path']), cv2.IMREAD_COLOR)
     
     H, W = img.shape[:2]
     # get bottom-center pixel of bbox
@@ -460,8 +460,8 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
     if not _HAS_ULTRALYTICS:
         raise SystemExit("ERROR: ultralytics not installed. Try: pip install ultralytics")
 
-    centroid_lon, centroid_lat = data["input_coordinates"][0], data["input_coordinates"][1]
-    all_images = data["image_dicts"]
+    centroid_lon, centroid_lat = data['input_coordinates'][0], data['input_coordinates'][1]
+    all_images = data['image_dicts']
 
     candidate_images_dir = Path("candidate_images") / "run_candidates"
     candidate_images_dir.mkdir(parents=True, exist_ok=True)
@@ -470,11 +470,11 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
     image_compass_angles = {}
     for img_path in all_images:
         # build dictionary of all compass angles to be easily accessed later
-        path = img_path["image_path"]
+        path = img_path['image_path']
         if _is_360(img_path):
             image_compass_angles[path] = "360"
         else:
-            image_compass_angles[path] = img_path["compass_angle"]
+            image_compass_angles[path] = img_path['compass_angle']
 
         # (when optionally checking ) put candidate images in other directory for validation
         src = Path(path)
@@ -486,10 +486,10 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
             print(f"[WARN] Failed to copy {src}: {e}")
 
     
-    place_names = data["places"]
+    place_names = data['places']
     
     # buildings : {building_id: [(wall_point_lon, wall_point_lat), ...], building_id: [...]}
-    buildings_lat_lon = data["building_polygons"]
+    buildings_lat_lon = data['building_polygons']
 
     # perform basic filtering based on brightness/quality
     print(f"All images pre image filtering by quality: {len(all_images)}")
@@ -514,7 +514,7 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
     # images_xy -> {image_path : (x, y), image_path : (x, y), ...}
     images_xy = {}
     for img in all_images:
-        images_xy[img["image_path"]] = to_local_xy(img["coordinates"][0], img["coordinates"][1], proj_local)
+        images_xy[img['image_path']] = to_local_xy(img['coordinates'][0], img['coordinates'][1], proj_local)
 
     # main loop
     # run model on each image get entrance detections
@@ -526,7 +526,7 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
     building_entrances = {}
     images_with_detections = {}
     for img in all_images:
-        path = img["image_path"]
+        path = img['image_path']
         detections = validate_folder_with_seg_and_yolo(path, yolo_weights, conf, iou, device, save_vis)
         # when no detections are made, move to next image
         if detections is None:
@@ -541,11 +541,11 @@ def run_inference(data, yolo_weights, conf, iou, device, save_vis):
             if bid is None or hit_xy is None:
                 continue
             # shift hit slightly outward toward camera to account for building polygons -> roof of building
-            hit_xy = hit_xy - 6.0 * dir_xy
+            #hit_xy = hit_xy - 6.0 * dir_xy
             print("Building matched")
             entrances_xy.append((bid, hit_xy))
-            print(f"Image coordinates: {img["coordinates"]}")
-            images_with_detections[path] = img["coordinates"]
+            print(f"Image coordinates: {img['coordinates']}")
+            images_with_detections[path] = img['coordinates']
 
         for (building_id, e_xy) in entrances_xy:
             entrance_lon, entrance_lat = to_lonlat_xy(e_xy, proj_local)
