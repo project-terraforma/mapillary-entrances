@@ -2,93 +2,74 @@
 
 Julien Howard and Evan Rantala
 
-This project integrates **Overture Buildings** (footprints) and **Overture Places** (points of interest) with **Mapillary** street-level imagery to detect and map building entrances.  
+This project integrates **Overture Buildings** and **Overture Places** with **Mapillary** street-level imagery to detect and map building entrances.  
 The pipeline combines:
 
 - Overture → DuckDB geospatial queries  
-- Mapillary imagery (360° preferred)  
-- View filtering (distance + heading/FOV logic)  
+- Mapillary imagery (360° preferred)   
 - YOLOv8 entrance detection  
 - Geometry-based triangulation to estimate entrance coordinates  
 
-All core Overture/Mapillary processing is implemented in `src/api.py`.  
-The full end-to-end pipeline is exposed through a **single CLI entrypoint**: `src.pipeline`.
+## Pipeline Structure
 
-## Project Structure
+- src/
+   - `pipeline.py`            → End-to-end runner (download → imagery → inference → output)
+   - `api.py`                 → API wrapper for programmatic access
+   - `download.py`            → Overture data download for specified radius
+   - `imagery.py`             → Mapillary queries, image preparation
+   - `inference.py`           → YOLOv8 detection and entrance extraction
 
-src/
-  api.py            → Overture + Places + Mapillary pipeline (programmatic API)
-  pipeline.py       → Unified end-to-end CLI runner (download → imagery → inference)
-  
-  # Overture data pipeline
-  buildings.py      → Overture Buildings helpers (footprints, polygons, walls)
-  places.py         → Overture Places helpers (optional metadata)
-  download_v2.py    → Download Overture Buildings/Places using DuckDB + S3
-  sources.py        → Resolves S3/local source paths
-  db.py             → DuckDB connection + parquet querying helpers
-  config.py         → Centralized constants (paths, S3 buckets, configs)
-  
-  # Imagery and geometry
-  imagery.py        → Mapillary API queries + filtering logic (360 preference)
-  selection.py      → Image–wall pairing and FOV/heading filters
-  inference_v2.py   → YOLOv8 inference + entrance triangulation
-  utils.py          → Common utilities (logging, geometry helpers, etc.)
+   - utils/
+      - `constants.py`         → Release versions, S3 paths, global constants
+      - `geo_utils.py`         → Haversine, bounding boxes
+      - `polygon_utils.py`     → Shapely/WKT parsing, polygon → walls, vertices
+      - `duckdb_utils.py`      → DuckDB connection, parquet querying helpers
+      - `mapillary_utils.py`   → Graph API fetching, image download helpers
+      - `matching_utils.py`    → Building and place matching, scoring logic
+      - `io_utils.py`          → File I/O, logging, directory helpers
+      - `inference_utils.py`   → Image filtering, YOLO model helpers, entrance point extraction
 
-docs/
-  ARCHITECTURE.md
-  pilot_area.md
-  places_matching.md
-
-data/               → Downloaded Overture extracts (buildings + places)
-results/            → Per-building output folders:
-                       candidates.json, raw images, _vis images, entrance results
----
 
 ## Setup
 
 ### 1. Clone the repository
 ```bash
 git clone https://github.com/project-terraforma/mapillary-entrances
-cd mapillary-entrances
+cd mapillary-entrances/src
 ```
-### 2. (Recommended) Create a virtual environment
+### 2. Create a virtual environment
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 ### 3. Environment variables
-Option A -- Export it in your shell
-```bash
-export MAPILLARY_ACCESS_TOKEN=YOUR_TOKEN_HERE
-```
-Option B -- Create a .env file (recommended)
+Create a .env file
 ``` bash
 MAPILLARY_ACCESS_TOKEN=YOUR_TOKEN_HERE
 ```
 
 ## Running the pipeline
-To run the pipeline, use `src.pipeline`
+To run the pipeline, use the file `pipeline.py`
 
-Running `src.pipeline` performs the full workflow automatically:
+Running `pipeline.py` performs the full workflow automatically:
 
 1. **Download Overture data**  
-   Uses `download_v2` to fetch Buildings (and optional Places) for the area around `--input_point` and `--search_radius`.
+   Uses `download.py` to fetch Buildings and Places for the area around `--input_point` and `--search_radius`.
 
 2. **Collect Mapillary imagery**  
-   Gathers nearby images, prefers 360° when available, and filters them by distance, heading, and FOV so only building-facing images are used.
+   `imagery.py` gathers nearby imagery with corresponding coordinates and compass angles, prefers 360° when available.
 
 3. **Run YOLOv8 inference**  
-   Passes the selected images to `inference_v2`, which detects potential entrances and saves optional visualizations.
+   Passes the gathered imagery and buildings to `inference.py`, which detects potential entrances and finds precise coordinates.
 
-4. **Compute final entrance location**  
-   Uses building geometry + detection rays to estimate a single entrance coordinate per building.
+4. **Save data with entrance locations**  
+   Saves output geojson file and images with detection to results directory.
 
-All results are written to `results/buildings/<building_id>/`.
 
 Example Usage:
 
 ```bash
-PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline \
+  python3 pipeline.py \
   --input_point="47.610,-122.341" \
   --search_radius=100 \
   --place_radius=100 \
@@ -99,7 +80,7 @@ PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline \
   --device="cpu" \
   --conf=0.60 \
   --iou=0.50 \
-  --save-vis="./outputs/visualizations"
+  --save="../outputs"
 ```
 # Notes on arguments
 
@@ -109,24 +90,24 @@ PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline \
 - `--max_images` → Limit on total Mapillary images  
 - `--prefer_360` → Prefer panorama imagery when available  
 - `--model` → YOLOv8 model weights  
-- `--conf`, `--iou` → YOLO thresholds  
-- `--save-vis` → Folder to save annotated images 
+- `--device` → CPU or GPU, (use GPU when available)
+- `--conf`, `--iou` → Detection thresholds  
+- `--save` → Directory to save annotated images and geojson output
 
 # Output Structure
 
-Each processed building produces:
+Each run of `pipeline.py` produces the following:
 
-results/buildings/<building_id>/
-├── candidates.json
-├── <image_id>.jpg
-├── <image_id>_vis.jpg                (if --save-vis is enabled)
-└── model_predictions.json            (optional)
+- `outputs/geojson_verifications/`
+   - `<lat>_<lon>.geojson`
+- `outputs/visualizations/`
+   - `<image_id>_vis.jpg`
 
-Where `candidates.json` contains:
+In `outputs/geojson_verifications/`, `<lat>_<lon>.geojson` contains the geojson file that can be copy and pasted into: https://geojson.io/#map=2/0/20, for visualizing the data. This geojson contains:
 
-- building metadata  
-- place metadata (optional)  
-- Mapillary image metadata  
-- building polygon + wall geometry  
-- YOLO detection results  
-- triangulated entrance coordinate estimate  
+   - Polygons for every building inside the search radius (marked with black lines)
+   - The Overture Places that correspond to each building (marked as green circles)
+   - Camera positions of the Mapillary images that produced valid detections (marked as orange circles)
+   - Predicted entrance coordinates (marked as red circles)
+
+In `outputs/visualizations/`, `<image_id>_vis.jpg` corresponds to a Mapillary image that resulted in an entrance detection. In this file, the resulting bounding box of the entrance is included in the original image, along with its confidence score. 
