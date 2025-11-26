@@ -35,7 +35,7 @@ The pipeline combines:
 ### 1. Clone the repository
 ```bash
 git clone https://github.com/project-terraforma/mapillary-entrances
-cd mapillary-entrances/src
+cd mapillary-entrances
 ```
 ### 2. Create a virtual environment
 ```bash
@@ -49,7 +49,7 @@ MAPILLARY_ACCESS_TOKEN=YOUR_TOKEN_HERE
 ```
 
 ## Running the pipeline
-To run the pipeline, use the file `pipeline.py`
+To run the pipeline, use the file `pipeline.py`, which is found inside `/src`
 
 Running `pipeline.py` performs the full workflow automatically:
 
@@ -69,17 +69,17 @@ Running `pipeline.py` performs the full workflow automatically:
 Example Usage:
 
 ```bash
-  python3 pipeline.py \
+  PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline \
   --input_point="47.610,-122.341" \
   --search_radius=100 \
   --place_radius=100 \
   --max_images=50 \
   --prefer_360 \
-  --model="yolo_weights_500_image_set.pt" \
+  --model="yolo_weights_750_image_set.pt" \
   --device="cpu" \
   --conf=0.60 \
   --iou=0.50 \
-  --save="../outputs"
+  --save="outputs"
 ```
 # Notes on arguments
 
