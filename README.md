@@ -70,7 +70,7 @@ Example Usage:
 
 ```bash
   PYTHONUNBUFFERED=1 PYTHONPATH=. python3 -m src.pipeline \
-  --input_point="47.610,-122.341" \
+  --input_point="37.780,-122.4092" \
   --search_radius=100 \
   --place_radius=100 \
   --max_images=50 \
@@ -88,7 +88,7 @@ Example Usage:
 - `--place_radius` → Radius around each building to search for place  
 - `--max_images` → Limit on total Mapillary images  
 - `--prefer_360` → Prefer panorama imagery when available  
-- `--model` → YOLOv8 model weights  
+- `--model` → Name of YOLOv8 model to be downloaded from Hugging Face (use the name in example usage for best weights) 
 - `--device` → CPU or GPU, (use GPU when available)
 - `--conf`, `--iou` → Detection thresholds  
 - `--save` → Directory to save annotated images and geojson output
@@ -102,11 +102,10 @@ Each run of `pipeline.py` produces the following:
 - `outputs/visualizations/`
    - `<image_id>_vis.jpg`
 
-In `outputs/geojson_verifications/`, `<lat>_<lon>.geojson` contains the geojson file that can be copy and pasted into: https://geojson.io/#map=2/0/20, for visualizing the data. This geojson contains:
+In `outputs/geojson_verifications/`, `<lat>_<lon>.geojson` contains the geojson file that can be visualized in: https://geojson.io/#map=2/0/20. This geojson contains:
 
-   - Polygons for every building inside the search radius (marked with black lines)
+   - Polygons for every building inside the search radius (marked with blue lines)
    - The Overture Places that correspond to each building (marked as green circles)
-   - Camera positions of the Mapillary images that produced valid detections (marked as orange circles)
    - Predicted entrance coordinates (marked as red circles)
 
 In `outputs/visualizations/`, `<image_id>_vis.jpg` corresponds to a Mapillary image that resulted in an entrance detection. In this file, the resulting bounding box of the entrance is included in the original image, along with its confidence score. 
